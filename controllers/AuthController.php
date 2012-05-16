@@ -4,6 +4,7 @@ use \lithium\core\Libraries;
 use \lithium\net\http\Service;
 use \lithium\storage\Session;
 use \lithium\security\Auth;
+use \lithium\security\Password;
 class AuthController extends \lithium\action\Controller {
     protected $service = null;
 
@@ -11,13 +12,7 @@ class AuthController extends \lithium\action\Controller {
     {
         $token = Session::read('auth_github.token');
         if (empty($token)) {
-            $client_id    = Libraries::get('li3_auth_github', 'client_id');
-            $redirect_url = Libraries::get('li3_auth_github', 'redirect');
-            if (empty($redirect_url)) {
-                $redirect_url = 'http://jrgns/lithium/login/github/requested';
-            }
-            $params = http_build_query(compact('client_id', 'redirect_url'));
-            return $this->redirect('https://github.com/login/oauth/authorize?' . $params);
+            return $this->redirect('Auth::authorize');
         }
         $response = $this->getService(array('host' => 'api.github.com'))->get('/user', array('access_token' => $token));
         if (empty($response)) {
@@ -30,14 +25,31 @@ class AuthController extends \lithium\action\Controller {
         $model = Libraries::locate('models', 'Users');
         $user  = $model::findByEmail($response['email']);
         if (!$user) {
+            //Generate a random password
+            $arr = range('a', 'z') + range('A', 'Z') + range(0, 9);
+            $password = '';
+            for ($i = 0; $i < 32; $i++) {
+                $password .= $arr[rand(0, count($arr))];
+            }
             $user = $model::create();
             $user->username = $response['login'];
+            $user->password = Password::hash($password);
             $user->email    = $response['email'];
-            $user->active   = 1;
             $user->save();
         }
         Auth::set('default', $user);
-        return $this->redirect('Stories::index');
+        return $this->redirect('/');
+    }
+
+    public function authorize()
+    {
+        $client_id    = Libraries::get('li3_auth_github', 'client_id');
+        $redirect_url = Libraries::get('li3_auth_github', 'redirect');
+        if (empty($redirect_url)) {
+            $redirect_url = $this->request->env('HTTP_BASE') . '/login/github/requested';
+        }
+        $params = http_build_query(compact('client_id', 'redirect_url'));
+        return $this->redirect('https://github.com/login/oauth/authorize?' . $params);
     }
 
     public function requested()
